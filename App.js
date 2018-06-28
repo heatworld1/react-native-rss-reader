@@ -1,5 +1,4 @@
 import React, { Component } from "react";
-import update from "immutability-helper";
 import {
   Container,
   Header,
@@ -29,7 +28,8 @@ import {
   TextInput,
   Keyboard,
   RefreshControl,
-  Alert
+  Alert,
+  AsyncStorage
 } from "react-native";
 import axios from "axios";
 import DOMParser from "react-native-html-parser";
@@ -54,20 +54,24 @@ export default class ReaderX extends Component {
       editId: ""
     };
 
-    console.ignoredYellowBox = ["Setting a timer"];
-
+    //Setup our db using firebase
     this.db = firebase.database();
 
-    //
+    //Pesky error firebase and timers
+    //https://github.com/firebase/firebase-js-sdk/issues/97
+    console.ignoredYellowBox = ["Setting a timer", "Remote debugger"];
   }
 
   _onRefresh() {
+    //start the refresh
     this.setState({ refreshing: true });
-    this.getReaders(true);
+
+    //Get the readers
+    this.getReaders();
   }
 
   setModalVisible(visible) {
-    console.log("close");
+    //Reset things
     this.setState({
       modalVisible: visible,
       editMode: false,
@@ -78,8 +82,8 @@ export default class ReaderX extends Component {
   }
 
   componentDidMount() {
-    console.log("did mount");
-
+    console.log("mounted");
+    //When ready get the readers
     this.getReaders();
   }
 
@@ -87,8 +91,6 @@ export default class ReaderX extends Component {
     var fn = this.state.newFeedName,
       fu = this.state.newFeedUrl,
       self = this;
-
-    console.log("state", this.state);
 
     if (!fn || !fu) {
       alert("Add a name and url");
@@ -107,6 +109,7 @@ export default class ReaderX extends Component {
             feedUrl: fu
           },
           function() {
+            //Set form to blank
             self.setState({
               newFeedName: "",
               newFeedUrl: "",
@@ -114,9 +117,13 @@ export default class ReaderX extends Component {
               editId: ""
             });
 
+            //Let the user know it saved
             Alert.alert("Saved!");
 
+            //Hide the keyboard
             Keyboard.dismiss();
+
+            //Summon the readers
             self.getReaders();
           }
         );
@@ -130,14 +137,19 @@ export default class ReaderX extends Component {
         feedUrl: fu
       },
       function() {
+        //Reset the form
         self.setState({
           newFeedName: "",
           newFeedUrl: ""
         });
 
+        //Let the user know it saved
         Alert.alert("Saved!");
 
+        //Hide the keyboard
         Keyboard.dismiss();
+
+        //Summon the readers
         self.getReaders();
       }
     );
@@ -145,8 +157,8 @@ export default class ReaderX extends Component {
 
   deleteReader(id) {
     var self = this;
-    console.log("eelet", id);
 
+    //Check before deleting
     Alert.alert(
       "Delete Feed:",
       "Are you sure you want to delete?",
@@ -164,24 +176,23 @@ export default class ReaderX extends Component {
   }
 
   deleteFeed(id) {
+    //Remove from db
     this.db
       .ref("feeds")
       .child(id)
       .remove();
 
+    //Reload
     this.getReaders();
   }
 
   editReader(id) {
-    var self = this;
-    console.log("let edit", id);
-    var ref = this.db.ref("feeds").child(id);
+    var self = this,
+      ref = this.db.ref("feeds").child(id);
 
-    console.log(ref);
-
+    //Load up the reader info
     ref.on("value", function(snap) {
       var data = snap.val();
-      console.log(snap.val());
 
       //Set the for to have the data
       self.setState({
@@ -193,51 +204,91 @@ export default class ReaderX extends Component {
     });
   }
 
-  getReaders(kill) {
-    console.log("get thems");
+  convertUTCDateToLocalDate(date) {
+    var newDate = new Date(date.getTime()+date.getTimezoneOffset()*60*1000);
+
+    var offset = date.getTimezoneOffset() / 60;
+    var hours = date.getHours();
+
+    newDate.setHours(hours - offset);
+
+    return newDate;
+}
+
+  async getReaders() {
+    console.log("get them");
     var urls = [],
       self = this;
 
-    // console.log(111);
-    //
-    // if (kill) {
-    //
-    //   this.state.posts = []
-    //   console.log("killed");
-    //   this.setState({
-    //     posts: update(this.state.posts, [])
-    //   });
-    //
-    //   this.setState({ refreshing: false });
-    //   return;
-    // }
+    //Check for localstorage
+    try {
+      console.log("check the storagezzz");
+      var feeds = await AsyncStorage.getItem("FEEDS");
 
-    //Get all readers
-    this.db.ref("feeds").on("value", feed => {
-      feed.forEach(f => {
-        var obj = f.val();
-        obj.feedHash = f.key;
-        urls.push(obj);
-      });
 
-      this.state.feedList = [];
+      if (true || feeds == null) {
+        console.log(1111);
+        //Get all readers
+        this.db.ref("feeds").on("value", async feed => {
+          feed.forEach(f => {
+            var obj = f.val();
 
-      this.setState({
-        feedList: urls
-      });
+            obj.feedHash = f.key;
+            urls.push(obj);
+          });
 
-      this.state.posts = [];
+          console.log("urls", urls);
 
-      urls.forEach(function(url, index) {
-        console.log("url to be fetched: " + url);
-        self.fetchPosts(url.feedUrl).then(this.parsePosts);
-      });
+          //Do a reset
+          this.state.feedList = [];
 
-      this.setState({ refreshing: false });
-    });
+          //Set new list
+          this.setState({
+            feedList: urls
+          });
+
+          //set the data to localstorage
+          try {
+            const remove = await AsyncStorage.removeItem("FEEDS");
+            console.log("remore ", remove);
+            console.log(urls);
+            const set = await AsyncStorage.setItem(
+              "FEEDS",
+              JSON.stringify(urls)
+            );
+            console.log("set", set);
+          } catch (error) {
+            console.log("Error: " + error);
+          }
+
+          urls.forEach(function(url, index) {
+            console.log("url to be fetched: " + url);
+            self.fetchPosts(url.feedUrl).then(this.parsePosts);
+          });
+        });
+      } else {
+        console.log(222);
+        this.state.feedList = [];
+
+        //Set new list
+        this.setState({
+          feedList: JSON.parse(feeds)
+        });
+
+        //Get data for each string
+        JSON.parse(feeds).forEach(function(url, index) {
+          console.log("url to be fetched: " + url);
+          self.fetchPosts(url.feedUrl).then(this.parsePosts);
+        });
+      }
+    } catch (e) {
+      console.log("Error: " + e);
+    }
+
+    //Clear the refreshing state
+    this.setState({ refreshing: false });
   }
 
-  //fetchPosts = url => axios.get(url);
   fetchPosts = url =>
     fetch(
       "https://api.rss2json.com/v1/api.json?rss_url=" +
@@ -248,29 +299,33 @@ export default class ReaderX extends Component {
       .then(this.parsePosts);
 
   parsePosts = response => {
-    console.log("parse them all");
     var postList = [];
 
+    //Make sure the api is returning good data
     if (typeof response !== "undefined" && response.status === "ok") {
       response.items.forEach(item => {
+        //var d = convertUTCDateToLocalDate(new Date(item.pubDate));
+
         postList.push({
           title: item.title,
           href: item.link,
           desc: item.description,
-          date: moment(item.pubDate).format("MMMM Do YYYY, h:mm a"),
-          timestamp: moment(item.pubDate).valueOf(),
+          date: moment(item.pubDate).subtract('193', 'minutes').format("MMMM Do YYYY, h:mm a"),
+          timestamp: moment(item.pubDate).subtract('193', 'minutes').valueOf(),
           thumb: item.thumbnail,
           articleTitle: response.feed.title
         });
       });
     }
 
+    //Check to make sure we got a post
     if (postList.length) {
-      console.log(postList);
       var masterList = this.state.posts.concat(postList);
 
+      //Erase the post
       this.state.posts = [];
 
+      //Set the post and order them
       this.setState({
         posts: masterList.sort((a, b) => {
           return b.timestamp - a.timestamp;
@@ -280,10 +335,12 @@ export default class ReaderX extends Component {
   };
 
   openArticle = url => {
+    //Open article in new page
     Linking.openURL(url);
   };
 
   textChange = stateName => value => {
+    //Handle the changing of text
     this.setState({
       [stateName]: value
     });
@@ -333,8 +390,8 @@ export default class ReaderX extends Component {
                 <Body style={{ width: "100%" }}>
                   <Text style={{ fontSize: 8 }}>{item.title}</Text>
                   <Text style={{ fontSize: 6, marginTop: 5 }}>{item.date}</Text>
-                  <Text style={{ fontWeight: "bold" }}>
-                    {item.articleTitle}
+                  <Text style={{ fontSize: 6, fontWeight: "bold" }}>
+                    -- {item.articleTitle} --
                   </Text>
                 </Body>
               </ListItem>
