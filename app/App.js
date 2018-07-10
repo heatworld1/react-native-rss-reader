@@ -38,7 +38,6 @@ import { auth, firebase } from "./firebase/firebase";
 
 export default class ReaderX extends Component {
   constructor() {
-    console.log("constructor");
     super();
     this.state = {
       modalVisible: false,
@@ -82,7 +81,6 @@ export default class ReaderX extends Component {
   }
 
   componentDidMount() {
-    console.log("mounted");
     //When ready get the readers
     this.getReaders();
   }
@@ -163,7 +161,10 @@ export default class ReaderX extends Component {
       "Delete Feed:",
       "Are you sure you want to delete?",
       [
-        { text: "Cancel", onPress: () => console.log("Cancel Pressed") },
+        {
+          text: "Cancel",
+          onPress: () => {}
+        },
         {
           text: "Delete",
           onPress: () => {
@@ -205,7 +206,9 @@ export default class ReaderX extends Component {
   }
 
   convertUTCDateToLocalDate(date) {
-    var newDate = new Date(date.getTime()+date.getTimezoneOffset()*60*1000);
+    var newDate = new Date(
+      date.getTime() + date.getTimezoneOffset() * 60 * 1000
+    );
 
     var offset = date.getTimezoneOffset() / 60;
     var hours = date.getHours();
@@ -213,77 +216,38 @@ export default class ReaderX extends Component {
     newDate.setHours(hours - offset);
 
     return newDate;
-}
+  }
 
-  async getReaders() {
-    console.log("get them");
+  getReaders() {
     var urls = [],
       self = this;
 
-    //Check for localstorage
-    try {
-      console.log("check the storagezzz");
-      var feeds = await AsyncStorage.getItem("FEEDS");
+    //Get all readers
+    this.db.ref("feeds").on("value", async feed => {
+      feed.forEach(f => {
+        var obj = f.val();
 
+        obj.feedHash = f.key;
+        urls.push(obj);
+      });
 
-      if (true || feeds == null) {
-        console.log(1111);
-        //Get all readers
-        this.db.ref("feeds").on("value", async feed => {
-          feed.forEach(f => {
-            var obj = f.val();
+      //Do a reset
+      this.state.feedList = [];
 
-            obj.feedHash = f.key;
-            urls.push(obj);
-          });
+      //Set new list
+      this.setState({
+        feedList: urls
+      });
 
-          console.log("urls", urls);
+      this.state.posts = [];
+      this.setState({
+        posts: []
+      });
 
-          //Do a reset
-          this.state.feedList = [];
-
-          //Set new list
-          this.setState({
-            feedList: urls
-          });
-
-          //set the data to localstorage
-          try {
-            const remove = await AsyncStorage.removeItem("FEEDS");
-            console.log("remore ", remove);
-            console.log(urls);
-            const set = await AsyncStorage.setItem(
-              "FEEDS",
-              JSON.stringify(urls)
-            );
-            console.log("set", set);
-          } catch (error) {
-            console.log("Error: " + error);
-          }
-
-          urls.forEach(function(url, index) {
-            console.log("url to be fetched: " + url);
-            self.fetchPosts(url.feedUrl).then(this.parsePosts);
-          });
-        });
-      } else {
-        console.log(222);
-        this.state.feedList = [];
-
-        //Set new list
-        this.setState({
-          feedList: JSON.parse(feeds)
-        });
-
-        //Get data for each string
-        JSON.parse(feeds).forEach(function(url, index) {
-          console.log("url to be fetched: " + url);
-          self.fetchPosts(url.feedUrl).then(this.parsePosts);
-        });
-      }
-    } catch (e) {
-      console.log("Error: " + e);
-    }
+      urls.forEach(function(url, index) {
+        self.fetchPosts(url.feedUrl).then(this.parsePosts);
+      });
+    });
 
     //Clear the refreshing state
     this.setState({ refreshing: false });
@@ -310,8 +274,12 @@ export default class ReaderX extends Component {
           title: item.title,
           href: item.link,
           desc: item.description,
-          date: moment(item.pubDate).subtract('193', 'minutes').format("MMMM Do YYYY, h:mm a"),
-          timestamp: moment(item.pubDate).subtract('193', 'minutes').valueOf(),
+          date: moment(item.pubDate)
+            .subtract("193", "minutes")
+            .format("MMMM Do YYYY, h:mm a"),
+          timestamp: moment(item.pubDate)
+            .subtract("193", "minutes")
+            .valueOf(),
           thumb: item.thumbnail,
           articleTitle: response.feed.title
         });
@@ -324,6 +292,9 @@ export default class ReaderX extends Component {
 
       //Erase the post
       this.state.posts = [];
+      this.setState({
+        posts: []
+      });
 
       //Set the post and order them
       this.setState({
